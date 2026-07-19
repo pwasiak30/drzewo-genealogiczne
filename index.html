@@ -48,7 +48,9 @@
   }
   @media (max-width: 980px){
     .layout{ grid-template-columns: 1fr; height:auto; }
-    #sidebar, #detailsPanel{ max-height:none; }
+    #sidebar, #detailsPanel{ max-height:60vh; }
+    main{ height:60vh; min-height:420px; }
+    header{ flex-wrap:wrap; gap:8px; }
   }
   aside{
     background:var(--panel);
@@ -183,6 +185,7 @@
     <div class="sub">Twórz, rozwijaj i wizualizuj historię swojej rodziny</div>
   </div>
   <div class="actions-row" style="margin-top:0;">
+    <button class="btn small" id="btnSearchArchives" style="background:var(--accent-2);">🔎 Szukaj przodków w bazach</button>
     <button class="btn secondary small" id="btnHelp">Jak to działa?</button>
   </div>
 </header>
@@ -287,6 +290,35 @@
     <div class="modal-footer">
       <button class="btn secondary" data-close="relationModalOverlay">Anuluj</button>
       <button class="btn" id="btnSaveRelation">Połącz z istniejącą osobą</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: szukaj w archiwach -->
+<div class="modal-overlay hidden" id="searchModalOverlay">
+  <div class="modal">
+    <button class="close-x" data-close="searchModalOverlay">✕</button>
+    <h2>🔎 Szukaj przodków w archiwach</h2>
+    <div class="modal-sub">Wpisz imię i nazwisko osoby, której szukasz, i otwórz wyszukiwanie w darmowych, publicznych bazach rekordów archiwalnych. Jeśli masz wybraną osobę na drzewie, pola uzupełnią się same.</div>
+    <div class="form-grid">
+      <div class="field"><label>Imię</label><input type="text" id="s_imie" placeholder="np. Jan"></div>
+      <div class="field"><label>Nazwisko</label><input type="text" id="s_nazwisko" placeholder="np. Kowalski"></div>
+    </div>
+    <p style="font-size:11.5px; color:var(--muted); line-height:1.5; margin-top:14px;">
+      To zewnętrzne, niezależne serwisy (nie część tej aplikacji) — otworzą się w nowej karcie z podstawionym nazwiskiem. Czasem trzeba będzie doprecyzować wyszukiwanie ręcznie na ich stronie.
+    </p>
+    <div class="external-search" style="margin-top:10px;">
+      <div class="links">
+        <a class="btn small" style="text-decoration:none; text-align:center;" target="_blank" rel="noopener" id="s_link_familysearch"
+           href="#">FamilySearch (światowa baza rekordów)</a>
+        <a class="btn small" style="text-decoration:none; text-align:center;" target="_blank" rel="noopener" id="s_link_geneteka"
+           href="#">Geneteka PTG (metryki polskie)</a>
+        <a class="btn small" style="text-decoration:none; text-align:center;" target="_blank" rel="noopener" id="s_link_geneszukacz"
+           href="#">Geneszukacz PTG (wyszukiwarka zbiorcza)</a>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn secondary" data-close="searchModalOverlay">Zamknij</button>
     </div>
   </div>
 </div>
@@ -496,18 +528,17 @@ function renderDetails(){
       <button class="btn danger small" id="btnDeletePerson">🗑 Usuń osobę</button>
     </div>`;
 
-  const surnameQuery = encodeURIComponent(p.nazwiskoRodowe || p.nazwisko || '');
-  const givenQuery = encodeURIComponent(p.imie || '');
+  const archiveLinks = buildArchiveLinks(p.imie, p.nazwiskoRodowe || p.nazwisko);
   html += `<div class="external-search">
       <h3 style="margin-top:0;">🔎 Szukaj w archiwach genealogicznych</h3>
       <p>Poniższe przyciski otwierają darmowe, publiczne wyszukiwarki rekordów archiwalnych (metryki, spisy, drzewa) w nowej karcie z podstawionym nazwiskiem — to zewnętrzne serwisy, nie są częścią tej aplikacji, więc czasem trzeba będzie doprecyzować wyszukiwanie ręcznie.</p>
       <div class="links">
         <a class="btn secondary small" style="text-decoration:none; text-align:center;" target="_blank" rel="noopener"
-           href="https://www.familysearch.org/search/record/results?q.givenName=${givenQuery}&q.surname=${surnameQuery}">FamilySearch (światowa baza rekordów)</a>
+           href="${archiveLinks.familysearch}">FamilySearch (światowa baza rekordów)</a>
         <a class="btn secondary small" style="text-decoration:none; text-align:center;" target="_blank" rel="noopener"
-           href="https://geneteka.genealodzy.pl/index.php?op=gt&lang=pol&search_lastname=${surnameQuery}&search_lastname2=&from_date=&to_date=&rid=B">Geneteka PTG (metryki polskie)</a>
+           href="${archiveLinks.geneteka}">Geneteka PTG (metryki polskie)</a>
         <a class="btn secondary small" style="text-decoration:none; text-align:center;" target="_blank" rel="noopener"
-           href="https://geneszukacz.genealodzy.pl/index.php?search_lastname=${surnameQuery}">Geneszukacz PTG (wyszukiwarka zbiorcza)</a>
+           href="${archiveLinks.geneszukacz}">Geneszukacz PTG (wyszukiwarka zbiorcza)</a>
       </div>
     </div>`;
 
@@ -816,6 +847,35 @@ document.getElementById('btnCreateNewRelative').addEventListener('click', ()=>{
   closeModal('relationModalOverlay');
   openPersonModal(null, {fromId, type});
 });
+
+/* ============================= MODAL: SZUKAJ W ARCHIWACH ============================= */
+function buildArchiveLinks(imie, nazwisko){
+  const g = encodeURIComponent(imie||'');
+  const s = encodeURIComponent(nazwisko||'');
+  return {
+    familysearch: `https://www.familysearch.org/search/record/results?q.givenName=${g}&q.surname=${s}`,
+    geneteka: `https://geneteka.genealodzy.pl/index.php?op=gt&lang=pol&search_lastname=${s}&search_lastname2=&from_date=&to_date=&rid=B`,
+    geneszukacz: `https://geneszukacz.genealodzy.pl/index.php?search_lastname=${s}`
+  };
+}
+function updateSearchModalLinks(){
+  const imie = document.getElementById('s_imie').value.trim();
+  const nazwisko = document.getElementById('s_nazwisko').value.trim();
+  const links = buildArchiveLinks(imie, nazwisko);
+  document.getElementById('s_link_familysearch').href = links.familysearch;
+  document.getElementById('s_link_geneteka').href = links.geneteka;
+  document.getElementById('s_link_geneszukacz').href = links.geneszukacz;
+}
+function openSearchModal(){
+  const p = state.people[state.focusId];
+  document.getElementById('s_imie').value = p ? (p.imie||'') : '';
+  document.getElementById('s_nazwisko').value = p ? (p.nazwiskoRodowe || p.nazwisko || '') : '';
+  updateSearchModalLinks();
+  openModal('searchModalOverlay');
+}
+document.getElementById('btnSearchArchives').addEventListener('click', openSearchModal);
+document.getElementById('s_imie').addEventListener('input', updateSearchModalLinks);
+document.getElementById('s_nazwisko').addEventListener('input', updateSearchModalLinks);
 
 /* ============================= GLOBAL UI WIRING ============================= */
 document.querySelectorAll('[data-close]').forEach(btn=>{

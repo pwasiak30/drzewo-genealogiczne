@@ -46,11 +46,24 @@
     grid-template-columns: 280px 1fr 320px;
     height:calc(100vh - 60px);
   }
+  .mobile-tabs{ display:none; }
   @media (max-width: 980px){
-    .layout{ grid-template-columns: 1fr; height:auto; }
-    #sidebar, #detailsPanel{ max-height:60vh; }
-    main{ height:60vh; min-height:420px; }
+    .layout{ grid-template-columns: 1fr; height:calc(100vh - 60px - 52px); }
+    #sidebar, #detailsPanel{ max-height:none; height:100%; }
+    main{ height:100%; min-height:0; }
     header{ flex-wrap:wrap; gap:8px; }
+    .mobile-tabs{
+      display:flex; position:sticky; top:60px; z-index:40; background:var(--panel);
+      border-bottom:1px solid var(--line); box-shadow:var(--shadow);
+    }
+    .mobile-tabs button{
+      flex:1; padding:12px 6px; background:none; border:none; font-size:13px; font-weight:600;
+      color:var(--muted); cursor:pointer; border-bottom:3px solid transparent;
+    }
+    .mobile-tabs button.active{ color:var(--accent-dark); border-bottom-color:var(--accent); }
+    .tab-panel{ display:none; }
+    .tab-panel.active{ display:block; }
+    main.tab-panel.active{ display:block; height:100%; }
   }
   aside{
     background:var(--panel);
@@ -190,8 +203,14 @@
   </div>
 </header>
 
+<div class="mobile-tabs" id="mobileTabs">
+  <button data-tab="osoby">👥 Osoby</button>
+  <button data-tab="drzewo">🌳 Drzewo</button>
+  <button data-tab="szczegoly">📋 Szczegóły</button>
+</div>
+
 <div class="layout">
-  <aside id="sidebar">
+  <aside id="sidebar" class="tab-panel" data-tab="osoby">
     <h2 class="panel-title">Osoby</h2>
     <input id="searchBox" placeholder="Szukaj po imieniu lub nazwisku...">
     <button class="btn" id="btnAddPerson">+ Dodaj osobę</button>
@@ -204,7 +223,7 @@
     </div>
   </aside>
 
-  <main>
+  <main class="tab-panel" data-tab="drzewo">
     <div id="treeContainer">
       <svg id="treeSvg"><g id="viewport"></g></svg>
       <div id="emptyState">
@@ -221,7 +240,7 @@
     </div>
   </main>
 
-  <aside id="detailsPanel">
+  <aside id="detailsPanel" class="tab-panel" data-tab="szczegoly">
     <h2 class="panel-title">Szczegóły osoby</h2>
     <div id="detailsContent">
       <p style="color:var(--muted); font-size:13px;">Wybierz osobę z listy lub na drzewie, aby zobaczyć jej dane, fakty i powiązania rodzinne.</p>
@@ -438,6 +457,27 @@ function deletePerson(id){
   saveState();
 }
 
+/* ============================= ZAKŁADKI (widok mobilny) ============================= */
+function switchTab(tab){
+  document.querySelectorAll('.tab-panel').forEach(el=>{
+    el.classList.toggle('active', el.dataset.tab===tab);
+  });
+  document.querySelectorAll('#mobileTabs button').forEach(btn=>{
+    btn.classList.toggle('active', btn.dataset.tab===tab);
+  });
+  if(tab==='drzewo'){
+    // SVG był ukryty (display:none), więc jego wymiary mogły być zerowe — przelicz układ po pokazaniu
+    requestAnimationFrame(()=> renderTree());
+  }
+}
+document.querySelectorAll('#mobileTabs button').forEach(btn=>{
+  btn.addEventListener('click', ()=> switchTab(btn.dataset.tab));
+});
+function selectPerson(id, opts){
+  state.focusId = id; saveState(); renderAll();
+  if(!opts || opts.switchToDetails !== false) switchTab('szczegoly');
+}
+
 /* ============================= RENDER: SIDEBAR LIST ============================= */
 function renderPeopleList(){
   const ul = document.getElementById('peopleList');
@@ -450,7 +490,7 @@ function renderPeopleList(){
     const li = document.createElement('li');
     li.className = p.id === state.focusId ? 'active' : '';
     li.innerHTML = `<span>${escapeHtml(fullName(p))}</span><span class="years">${lifeSpanLabel(p)}</span>`;
-    li.addEventListener('click', ()=>{ state.focusId = p.id; saveState(); renderAll(); });
+    li.addEventListener('click', ()=> selectPerson(p.id));
     ul.appendChild(li);
   });
   document.getElementById('emptyState').classList.toggle('hidden', Object.keys(state.people).length>0);
@@ -546,7 +586,7 @@ function renderDetails(){
 
   document.getElementById('btnAddRelative').addEventListener('click', ()=> openRelationModal(p.id));
   document.getElementById('btnEditPerson').addEventListener('click', ()=> openPersonModal(p.id));
-  document.getElementById('btnCenterTree').addEventListener('click', ()=> { state.focusId = p.id; renderTree(); });
+  document.getElementById('btnCenterTree').addEventListener('click', ()=> { state.focusId = p.id; saveState(); switchTab('drzewo'); });
   document.getElementById('btnDeletePerson').addEventListener('click', ()=>{
     if(confirm(`Na pewno usunąć ${fullName(p)} z drzewa? Tej operacji nie można cofnąć.`)){
       deletePerson(p.id);
@@ -563,7 +603,7 @@ function renderDetails(){
           renderAll();
         }
       } else {
-        state.focusId = chip.dataset.id; saveState(); renderAll();
+        selectPerson(chip.dataset.id);
       }
     });
   });
@@ -805,6 +845,8 @@ document.getElementById('btnSavePerson').addEventListener('click', ()=>{
   } else {
     id = createPerson(data);
   }
+  const wasEditing = !!personModalContext.editingId;
+  const wasLinking = !!personModalContext.linkAfterSave;
   if(personModalContext.linkAfterSave){
     const {fromId, type} = personModalContext.linkAfterSave;
     addRelation(type, fromId, id);
@@ -815,6 +857,8 @@ document.getElementById('btnSavePerson').addEventListener('click', ()=>{
   if(!state.focusId) state.focusId = id;
   closeModal('personModalOverlay');
   renderAll();
+  if(wasLinking) switchTab('szczegoly');
+  else if(!wasEditing) switchTab('drzewo');
 });
 
 /* ============================= MODALS: RELATION ============================= */
@@ -839,6 +883,7 @@ document.getElementById('btnSaveRelation').addEventListener('click', ()=>{
   addRelation(type, relationContext.fromId, otherId);
   closeModal('relationModalOverlay');
   renderAll();
+  switchTab('szczegoly');
   showToast('Powiązanie dodane.');
 });
 document.getElementById('btnCreateNewRelative').addEventListener('click', ()=>{
@@ -932,6 +977,7 @@ window.addEventListener('resize', ()=> renderTree());
 /* ============================= INIT ============================= */
 loadState();
 renderAll();
+switchTab(Object.keys(state.people).length>0 ? 'drzewo' : 'osoby');
 </script>
 </body>
 </html>

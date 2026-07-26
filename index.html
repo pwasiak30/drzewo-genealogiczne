@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Moje Drzewo Genealogiczne</title>
 <script src="./d3.min.js"></script>
+<script src="./jspdf.umd.min.js"></script>
 <style>
   :root{
     --bg:#f6f1e7;
@@ -220,6 +221,7 @@
       <label class="import-label">⬆ Importuj dane (JSON)
         <input type="file" id="importFile" accept="application/json" hidden>
       </label>
+      <button class="btn secondary" id="btnExportPdf">🖨 Eksportuj drzewo do PDF</button>
     </div>
   </aside>
 
@@ -770,6 +772,183 @@ function renderTree(){
 }
 function trimText(t, n){ return t.length>n ? t.slice(0,n-1)+'…' : t; }
 
+/* ============================= EKSPORT DRZEWA DO PDF ============================= */
+// Buduje samodzielny, niezależny od bieżącego przybliżenia/przesunięcia widok SVG
+// całego (połączonego z osobą centralną) drzewa — używany wyłącznie do eksportu.
+function buildTreeExportSvg(){
+  if(!state.focusId || !state.people[state.focusId]) return null;
+  const {rows, parentEdges, spouseEdges, siblingEdges} = computeLayout(state.focusId);
+
+  const spacingX = 190, spacingY = 130, nodeW = 150, nodeH = 62;
+  const pos = new Map();
+  const gens = Array.from(rows.keys()).sort((a,b)=>a-b);
+  gens.forEach(g=>{
+    const ids = rows.get(g);
+    const rowWidth = ids.length * spacingX;
+    ids.forEach((id,i)=>{ pos.set(id, { x: i*spacingX - rowWidth/2 + spacingX/2, y: g*spacingY }); });
+  });
+  if(pos.size===0) return null;
+
+  const titleH = 46, pad = 40, titleFontSize = 18;
+  const titleStr = `Drzewo genealogiczne — ${fullName(state.people[state.focusId])}`;
+  const xs = Array.from(pos.values()).map(p=>p.x);
+  const ys = Array.from(pos.values()).map(p=>p.y);
+  let minX = Math.min(...xs) - nodeW/2 - pad;
+  let maxX = Math.max(...xs) + nodeW/2 + pad;
+  const minY = Math.min(...ys) - nodeH/2 - pad - titleH;
+  const maxY = Math.max(...ys) + nodeH/2 + pad;
+
+  // rozszerz szerokość, jeśli tytuł jest dłuższy niż samo drzewo, żeby się nie ucinał
+  const measureCanvas = document.createElement('canvas');
+  const mctx = measureCanvas.getContext('2d');
+  mctx.font = `700 ${titleFontSize}px Arial, Helvetica, sans-serif`;
+  const titleWidth = mctx.measureText(titleStr).width;
+  const neededWidth = titleWidth + pad*2;
+  if(neededWidth > (maxX-minX)){
+    const extra = (neededWidth - (maxX-minX)) / 2;
+    minX -= extra; maxX += extra;
+  }
+
+  const width = maxX - minX, height = maxY - minY;
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('xmlns', svgNS);
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
+  svg.setAttribute('viewBox', `${minX} ${minY} ${width} ${height}`);
+
+  const bg = document.createElementNS(svgNS, 'rect');
+  bg.setAttribute('x', minX); bg.setAttribute('y', minY);
+  bg.setAttribute('width', width); bg.setAttribute('height', height);
+  bg.setAttribute('fill', '#f6f1e7');
+  svg.appendChild(bg);
+
+  const title = document.createElementNS(svgNS, 'text');
+  title.setAttribute('x', minX + width/2); title.setAttribute('y', minY + 28);
+  title.setAttribute('text-anchor', 'middle'); title.setAttribute('font-size', String(titleFontSize));
+  title.setAttribute('font-weight', '700'); title.setAttribute('fill', '#2f2a22');
+  title.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+  title.textContent = titleStr;
+  svg.appendChild(title);
+
+  const edgeG = document.createElementNS(svgNS, 'g');
+  parentEdges.forEach(([pid,cid])=>{
+    const p = pos.get(pid), c = pos.get(cid);
+    if(!p || !c) return;
+    const midY = p.y + nodeH/2 + (c.y - nodeH/2 - (p.y+nodeH/2))/2;
+    const path = document.createElementNS(svgNS, 'path');
+    path.setAttribute('d', `M${p.x},${p.y+nodeH/2} V${midY} H${c.x} V${c.y-nodeH/2}`);
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#8a7f66'); path.setAttribute('stroke-width', '1.6');
+    edgeG.appendChild(path);
+  });
+  spouseEdges.forEach(([a,b])=>{
+    const pa = pos.get(a), pb = pos.get(b);
+    if(!pa || !pb) return;
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', pa.x); line.setAttribute('y1', pa.y);
+    line.setAttribute('x2', pb.x); line.setAttribute('y2', pb.y);
+    line.setAttribute('stroke', '#a45c40'); line.setAttribute('stroke-width', '2');
+    edgeG.appendChild(line);
+  });
+  siblingEdges.forEach(([a,b])=>{
+    const pa = pos.get(a), pb = pos.get(b);
+    if(!pa || !pb) return;
+    const line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('x1', pa.x); line.setAttribute('y1', pa.y-nodeH/2-6);
+    line.setAttribute('x2', pb.x); line.setAttribute('y2', pb.y-nodeH/2-6);
+    line.setAttribute('stroke', '#8a7f66'); line.setAttribute('stroke-width', '1.4'); line.setAttribute('stroke-dasharray', '3,3');
+    edgeG.appendChild(line);
+  });
+  svg.appendChild(edgeG);
+
+  const nodeG = document.createElementNS(svgNS, 'g');
+  pos.forEach((xy,id)=>{
+    const person = state.people[id];
+    if(!person) return;
+    const color = person.plec==='M' ? '#3f6e8c' : person.plec==='K' ? '#a15c7e' : '#8a8371';
+    const g = document.createElementNS(svgNS, 'g');
+    g.setAttribute('transform', `translate(${xy.x-nodeW/2},${xy.y-nodeH/2})`);
+    const rect = document.createElementNS(svgNS, 'rect');
+    rect.setAttribute('width', nodeW); rect.setAttribute('height', nodeH); rect.setAttribute('rx', 10);
+    rect.setAttribute('fill', color);
+    if(id === state.focusId){ rect.setAttribute('stroke', '#ffd76a'); rect.setAttribute('stroke-width', '3'); }
+    g.appendChild(rect);
+    const nameText = document.createElementNS(svgNS, 'text');
+    nameText.setAttribute('x', nodeW/2); nameText.setAttribute('y', 26); nameText.setAttribute('text-anchor', 'middle');
+    nameText.setAttribute('font-size', '12'); nameText.setAttribute('font-weight', '700'); nameText.setAttribute('fill', '#fff');
+    nameText.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+    nameText.textContent = trimText(fullName(person), 22);
+    g.appendChild(nameText);
+    const yearsText = document.createElementNS(svgNS, 'text');
+    yearsText.setAttribute('x', nodeW/2); yearsText.setAttribute('y', 44); yearsText.setAttribute('text-anchor', 'middle');
+    yearsText.setAttribute('font-size', '10.5'); yearsText.setAttribute('fill', 'rgba(255,255,255,0.85)');
+    yearsText.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+    yearsText.textContent = lifeSpanLabel(person) || '—';
+    g.appendChild(yearsText);
+    nodeG.appendChild(g);
+  });
+  svg.appendChild(nodeG);
+
+  return { svg, width, height };
+}
+
+function exportTreeToPDF(){
+  if(Object.keys(state.people).length===0){
+    showToast('Dodaj przynajmniej jedną osobę, aby wyeksportować drzewo.');
+    return;
+  }
+  const built = buildTreeExportSvg();
+  if(!built){
+    showToast('Brak danych do eksportu — wybierz osobę na drzewie.');
+    return;
+  }
+  const { svg, width, height } = built;
+
+  const serializer = new XMLSerializer();
+  const svgStr = serializer.serializeToString(svg);
+  const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+
+  const scale = 2; // wyższa rozdzielczość rastra = ostrzejszy PDF
+  const img = new Image();
+  img.onload = ()=>{
+    try{
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(width*scale));
+      canvas.height = Math.max(1, Math.round(height*scale));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#f6f1e7';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      const imgData = canvas.toDataURL('image/png', 1.0);
+
+      const { jsPDF } = window.jspdf;
+      const ptW = width * 0.75;  // px (96dpi) -> pt (72dpi)
+      const ptH = height * 0.75;
+      const pdf = new jsPDF({
+        orientation: ptW >= ptH ? 'landscape' : 'portrait',
+        unit: 'pt',
+        format: [ptW, ptH]
+      });
+      pdf.addImage(imgData, 'PNG', 0, 0, ptW, ptH);
+      const person = state.people[state.focusId];
+      const safeName = fullName(person).normalize('NFKD').replace(/[̀-ͯ]/g,'').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'') || 'drzewo';
+      pdf.save(`drzewo-genealogiczne-${safeName}-${new Date().toISOString().slice(0,10)}.pdf`);
+      showToast('Drzewo wyeksportowane do PDF.');
+    }catch(err){
+      console.warn('Błąd eksportu PDF', err);
+      showToast('Nie udało się wyeksportować drzewa do PDF.');
+    }
+  };
+  img.onerror = ()=>{
+    URL.revokeObjectURL(url);
+    showToast('Nie udało się wyeksportować drzewa do PDF.');
+  };
+  img.src = url;
+}
+
 function renderAll(){
   renderPeopleList();
   renderDetails();
@@ -964,6 +1143,8 @@ document.getElementById('importFile').addEventListener('change', (e)=>{
   };
   reader.readAsText(file);
 });
+
+document.getElementById('btnExportPdf').addEventListener('click', exportTreeToPDF);
 
 document.getElementById('zoomIn').addEventListener('click', ()=>{
   d3.select('#treeSvg').transition().call(zoomBehavior.scaleBy, 1.25);

@@ -4,203 +4,547 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Moje Drzewo Genealogiczne</title>
+<meta name="description" content="Aplikacja webowa do tworzenia, rozwijania i wizualizowania drzewa genealogicznego — działa w pełni offline.">
 <script src="./d3.min.js"></script>
 <script src="./jspdf.umd.min.js"></script>
+
+<!-- ===========================================================
+     ANTY-FOUC: ustawia motyw PRZED wyrenderowaniem <body>,
+     żeby uniknąć "mrugnięcia" jasnym tłem przy starcie w dark mode.
+     Musi być zsynchronizowany z kluczem STORAGE_KEY w skrypcie na dole strony.
+     Uwaga: aplikacja ma działać w pełni offline, więc celowo NIE ładujemy
+     fontów z Google Fonts (sieć) — zamiast tego --font-heading/--font-body
+     korzystają z eleganckich fontów systemowych, zachowując ducha stylu
+     (Fedora Project × Zorin OS) bez łamania offline-first.
+============================================================ -->
+<script>
+  (function () {
+    var saved = localStorage.getItem('drzewo-genealogiczne-theme');
+    var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+
 <style>
-  :root{
-    --bg:#f6f1e7;
-    --panel:#fffdf8;
-    --ink:#2f2a22;
-    --muted:#7a7263;
-    --line:#d9cfb8;
-    --accent:#4a6b52;
-    --accent-dark:#33493a;
-    --accent-2:#a45c40;
-    --male:#3f6e8c;
-    --female:#a15c7e;
-    --unknown:#8a8371;
-    --danger:#b1493a;
-    --radius:12px;
-    --shadow: 0 2px 10px rgba(47,42,34,0.08);
+/* =====================================================================
+   MOJE DRZEWO GENEALOGICZNE — style
+   Estetyka: Fedora Project (inżynieryjna czystość, whitespace, siatka)
+             + Zorin OS (glassmorphism, zaokrąglenia 16px, gradienty,
+             miękkie cienie, dark/light mode)
+
+   Aplikacja pozostaje offline-first: brak zewnętrznych fontów/zasobów —
+   tylko lokalne biblioteki (d3.min.js, jspdf.umd.min.js) i system fonts.
+
+   STRUKTURA PLIKU:
+   1. Custom Properties (zmienne) — motyw light/dark
+   2. Reset i ustawienia bazowe
+   3. Layout pomocniczy (kontener, przyciski, pola formularzy)
+   4. Nagłówek / navbar + przełącznik motywu
+   5. Zakładki mobilne
+   6. Panele boczne (Osoby / Szczegóły)
+   7. Obszar drzewa (canvas, węzły SVG, kontrolki zoom)
+   8. Modale
+   9. Toast
+   10. Mikrointerakcje / animacje
+   11. Media queries (mobile-first)
+   12. Dostępność (focus-visible, prefers-reduced-motion)
+===================================================================== */
+
+/* ---------------------------------------------------------------------
+   1. CUSTOM PROPERTIES
+   Aby zmienić kolorystykę, edytuj wyłącznie wartości w :root i [data-theme="dark"].
+   Reszta pliku odwołuje się tylko do tych zmiennych.
+--------------------------------------------------------------------- */
+:root{
+  /* Fonty — stos systemowy (offline-first), duch Red Hat Display / Inter / JetBrains Mono */
+  --font-heading: -apple-system, 'Segoe UI', 'Red Hat Display', system-ui, sans-serif;
+  --font-body: -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'SFMono-Regular', Consolas, Menlo, monospace;
+
+  /* Promienie zaokrągleń — 16px to sygnatura stylu Zorin OS */
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+
+  /* Blur efektów glassmorphism */
+  --blur-sm: 8px;
+  --blur-md: 16px;
+  --blur-lg: 28px;
+
+  /* Skala odstępów (spacing scale, 8px base) */
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2rem;
+  --space-5: 3rem;
+
+  /* Przejścia — jednolite tempo mikrointerakcji w całej aplikacji */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-fast: 160ms var(--ease);
+  --transition-base: 260ms var(--ease);
+  --transition-slow: 420ms var(--ease);
+
+  /* ---- MOTYW: LIGHT (domyślny) ---- */
+  --color-bg: #f4f5f7;
+  --color-bg-alt: #eceef2;
+  --color-surface: rgba(255, 255, 255, 0.68);
+  --color-surface-solid: #ffffff;
+  --color-border: rgba(15, 23, 42, 0.09);
+  --color-text: #14181f;
+  --color-text-muted: #565f6e;
+  --color-text-subtle: #8890a0;
+
+  /* Akcent — gradient techniczny niebiesko-cyjanowo-fioletowy */
+  --accent-1: #2563eb;
+  --accent-2: #06b6d4;
+  --accent-3: #7c3aed;
+  --gradient-accent: linear-gradient(135deg, var(--accent-1) 0%, var(--accent-2) 55%, var(--accent-3) 100%);
+  --gradient-bg-glow: radial-gradient(60% 60% at 50% 0%, rgba(37, 99, 235, 0.12), transparent 70%);
+
+  /* Kolory płci na drzewie/awatarach — osadzone w palecie akcentu */
+  --male: var(--accent-1);
+  --female: var(--accent-3);
+  --unknown: var(--color-text-subtle);
+  --danger: #dc2626;
+  --danger-dark: #b91c1c;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.06);
+  --shadow-glow: 0 0 0 1px rgba(37, 99, 235, 0.12), 0 12px 32px rgba(37, 99, 235, 0.18);
+
+  /* Kolory rastra drzewa (używane też przy eksporcie do PDF) */
+  --tree-canvas-bg: #f4f5f7;
+  --tree-dot: rgba(15, 23, 42, 0.10);
+  --tree-ink: #14181f;
+  --tree-edge: #8a93a6;
+  --tree-edge-spouse: var(--accent-3);
+  --tree-focus-ring: var(--accent-2);
+
+  color-scheme: light;
+}
+
+/* ---- MOTYW: DARK ----
+   Aktywowany, gdy <html data-theme="dark">. Ustawiane przez skrypt na dole strony. */
+[data-theme='dark']{
+  --color-bg: #0b0e14;
+  --color-bg-alt: #10141d;
+  --color-surface: rgba(23, 27, 38, 0.58);
+  --color-surface-solid: #151922;
+  --color-border: rgba(255, 255, 255, 0.09);
+  --color-text: #eef1f6;
+  --color-text-muted: #a4acbb;
+  --color-text-subtle: #6b7484;
+
+  --accent-1: #3b82f6;
+  --accent-2: #22d3ee;
+  --accent-3: #a855f7;
+  --gradient-accent: linear-gradient(135deg, var(--accent-1) 0%, var(--accent-2) 55%, var(--accent-3) 100%);
+  --gradient-bg-glow: radial-gradient(60% 60% at 50% 0%, rgba(59, 130, 246, 0.20), transparent 70%);
+
+  --male: var(--accent-1);
+  --female: var(--accent-3);
+  --unknown: var(--color-text-subtle);
+  --danger: #f87171;
+  --danger-dark: #ef4444;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.55);
+  --shadow-glow: 0 0 0 1px rgba(59, 130, 246, 0.25), 0 12px 40px rgba(59, 130, 246, 0.28);
+
+  --tree-canvas-bg: #0b0e14;
+  --tree-dot: rgba(255, 255, 255, 0.07);
+  --tree-ink: #eef1f6;
+  --tree-edge: #6b7484;
+  --tree-edge-spouse: var(--accent-3);
+  --tree-focus-ring: var(--accent-2);
+
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------
+   2. RESET I USTAWIENIA BAZOWE
+--------------------------------------------------------------------- */
+*, *::before, *::after{ box-sizing: border-box; }
+html, body{ height: 100%; margin: 0; }
+body{
+  font-family: var(--font-body);
+  background: var(--color-bg);
+  color: var(--color-text);
+  transition: background-color var(--transition-slow), color var(--transition-slow);
+}
+h1, h2, h3{ font-family: var(--font-heading); margin: 0; letter-spacing: -0.01em; }
+p{ margin: 0; }
+ul{ margin: 0; padding: 0; list-style: none; }
+code{ font-family: var(--font-mono); }
+
+/* ---------------------------------------------------------------------
+   3. LAYOUT POMOCNICZY — przyciski, pola formularzy
+--------------------------------------------------------------------- */
+.btn{
+  background: var(--gradient-accent);
+  color: #fff;
+  border: none;
+  padding: 9px 16px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+  box-shadow: var(--shadow-glow);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+}
+.btn:hover{ transform: translateY(-1px); box-shadow: 0 14px 32px rgba(37, 99, 235, 0.28); }
+.btn.secondary{
+  background: var(--color-surface-solid);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+.btn.secondary:hover{ transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.btn.danger{ background: var(--danger); box-shadow: none; }
+.btn.danger:hover{ background: var(--danger-dark); box-shadow: none; transform: translateY(-1px); }
+.btn.small{ padding: 6px 12px; font-size: 12px; }
+.btn:disabled{ opacity: .5; cursor: not-allowed; transform: none; }
+
+#searchBox{
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  margin-bottom: var(--space-2);
+  background: var(--color-surface-solid);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+#searchBox:focus{ outline: none; border-color: var(--accent-1); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
+
+label{ font-size: 11.5px; color: var(--color-text-muted); font-weight: 600; display: block; margin-bottom: 4px; }
+input[type=text], input[type=date], select, textarea{
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--color-bg-alt);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+input[type=text]:focus, input[type=date]:focus, select:focus, textarea:focus{
+  outline: none; border-color: var(--accent-1); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+textarea{ resize: vertical; min-height: 56px; }
+.field{ margin-bottom: 4px; }
+
+/* ---------------------------------------------------------------------
+   4. NAGŁÓWEK / NAVBAR + PRZEŁĄCZNIK MOTYWU
+--------------------------------------------------------------------- */
+header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 14px 20px;
+  /* Glassmorphism: rozmyte, półprzezroczyste tło */
+  background: var(--color-surface);
+  backdrop-filter: blur(var(--blur-md)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(150%);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  position: sticky; top: 0; z-index: 50;
+}
+header h1{ font-size: 18px; font-weight: 700; }
+header h1 .accent{
+  background: var(--gradient-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+header .sub{ font-size: 12px; color: var(--color-text-muted); margin-top: 2px; }
+header .actions-row{ margin-top: 0; align-items: center; }
+
+/* Przycisk przełączania motywu — okrągły, glass, z ikonami słońca/księżyca */
+.theme-toggle{
+  position: relative;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--color-surface-solid);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.theme-toggle:hover{ transform: rotate(-8deg) scale(1.05); box-shadow: var(--shadow-md); }
+.theme-toggle__icon{ position: absolute; transition: opacity var(--transition-base), transform var(--transition-base); }
+.theme-toggle__icon--moon{ opacity: 0; transform: scale(.5) rotate(45deg); }
+.theme-toggle__icon--sun{ opacity: 1; transform: scale(1) rotate(0deg); }
+[data-theme='dark'] .theme-toggle__icon--sun{ opacity: 0; transform: scale(.5) rotate(-45deg); }
+[data-theme='dark'] .theme-toggle__icon--moon{ opacity: 1; transform: scale(1) rotate(0deg); }
+
+/* ---------------------------------------------------------------------
+   5. ZAKŁADKI MOBILNE
+--------------------------------------------------------------------- */
+.layout{
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  height: calc(100vh - 66px);
+}
+.mobile-tabs{ display: none; }
+@media (max-width: 980px){
+  .layout{ grid-template-columns: 1fr; gap: 0; padding: 0; height: calc(100vh - 66px - 52px); }
+  #sidebar, #detailsPanel{ max-height: none; height: 100%; border-radius: 0; }
+  main{ height: 100%; min-height: 0; border-radius: 0; }
+  header{ gap: 8px; }
+  .mobile-tabs{
+    display: flex; position: sticky; top: 66px; z-index: 40;
+    background: var(--color-surface);
+    backdrop-filter: blur(var(--blur-md));
+    -webkit-backdrop-filter: blur(var(--blur-md));
+    border-bottom: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
   }
-  *{box-sizing:border-box;}
-  html,body{height:100%;margin:0;}
-  body{
-    font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    background:var(--bg);
-    color:var(--ink);
+  .mobile-tabs button{
+    flex: 1; padding: 12px 6px; background: none; border: none; font-size: 13px; font-weight: 700;
+    font-family: inherit; color: var(--color-text-muted); cursor: pointer; border-bottom: 3px solid transparent;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
   }
-  header{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:14px 20px;
-    background:var(--accent-dark);
-    color:#f6f1e7;
-    box-shadow: var(--shadow);
-    position:sticky; top:0; z-index:50;
+  .mobile-tabs button.active{ color: var(--accent-1); border-bottom-color: var(--accent-1); }
+  .tab-panel{ display: none; }
+  .tab-panel.active{ display: block; }
+  main.tab-panel.active{ display: block; height: 100%; }
+}
+
+/* ---------------------------------------------------------------------
+   6. PANELE BOCZNE (Osoby / Szczegóły)
+   Karty glassmorphism, radius-lg, spójne z resztą design systemu.
+--------------------------------------------------------------------- */
+aside{
+  background: var(--color-surface);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3);
+  overflow-y: auto;
+}
+h2.panel-title{ font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-subtle); margin: 0 0 var(--space-2); font-family: var(--font-mono); font-weight: 600; }
+
+#btnAddPerson{ width: 100%; margin-bottom: var(--space-3); }
+#peopleList li{
+  padding: 9px 11px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px;
+  display: flex; justify-content: space-between; align-items: center; gap: 6px;
+  margin-bottom: 3px;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+#peopleList li:hover{ background: var(--color-bg-alt); }
+#peopleList li.active{ background: var(--gradient-accent); color: #fff; box-shadow: var(--shadow-glow); }
+#peopleList li .years{ font-size: 11px; opacity: .75; white-space: nowrap; }
+
+.sidebar-actions{
+  margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.import-label{
+  display: inline-block; text-align: center;
+  background: var(--color-surface-solid); color: var(--color-text);
+  border: 1px solid var(--color-border); box-shadow: var(--shadow-sm);
+  padding: 9px 14px; border-radius: var(--radius-pill); font-size: 13px; cursor: pointer; font-weight: 600;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.import-label:hover{ transform: translateY(-1px); box-shadow: var(--shadow-md); }
+
+#detailsContent{ font-size: 13px; }
+.person-card-header{ display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.avatar{
+  width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 16px; flex-shrink: 0; box-shadow: var(--shadow-glow);
+}
+.fact-row{ display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px dashed var(--color-border); }
+.fact-row .k{ color: var(--color-text-muted); }
+.section-block{ margin-top: var(--space-3); }
+.section-block h3{ font-size: 11.5px; text-transform: uppercase; color: var(--color-text-subtle); margin: 0 0 8px; letter-spacing: .06em; font-weight: 700; }
+
+.rel-chip{
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--color-bg-alt); border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 5px 11px; font-size: 12px; margin: 0 6px 6px 0; cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+.rel-chip:hover{ background: var(--color-surface-solid); border-color: var(--accent-1); }
+.rel-chip .x{ opacity: .5; font-weight: 700; }
+.rel-chip .x:hover{ opacity: 1; color: var(--danger); }
+
+.actions-row{ display: flex; gap: 8px; margin-top: var(--space-3); flex-wrap: wrap; }
+
+.external-search{
+  margin-top: var(--space-3); padding: var(--space-2); border-radius: var(--radius-md);
+  background: var(--color-bg-alt); border: 1px solid var(--color-border);
+}
+.external-search h3{ margin-top: 0; }
+.external-search p{ font-size: 11.5px; color: var(--color-text-muted); margin: 0 0 var(--space-2); line-height: 1.5; }
+.external-search .links{ display: flex; flex-direction: column; gap: 6px; }
+
+/* ---------------------------------------------------------------------
+   7. OBSZAR DRZEWA (canvas, węzły SVG, kontrolki zoom)
+--------------------------------------------------------------------- */
+main{
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  background:
+    var(--gradient-bg-glow),
+    radial-gradient(circle at 1px 1px, var(--tree-dot) 1px, transparent 1px) 0 0/26px 26px,
+    var(--color-bg);
+}
+#treeContainer{ width: 100%; height: 100%; position: relative; }
+svg#treeSvg{ width: 100%; height: 100%; cursor: grab; }
+svg#treeSvg:active{ cursor: grabbing; }
+#emptyState{
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 10px; color: var(--color-text-muted); text-align: center; padding: 20px;
+}
+#emptyState button{ margin-top: 6px; }
+
+.zoom-controls{ position: absolute; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 6px; z-index: 10; }
+.zoom-controls button{
+  width: 36px; height: 36px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);
+  background: var(--color-surface-solid); backdrop-filter: blur(var(--blur-sm));
+  -webkit-backdrop-filter: blur(var(--blur-sm));
+  cursor: pointer; font-size: 16px; color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.zoom-controls button:hover{ transform: translateY(-1px); box-shadow: var(--shadow-md); }
+
+.node-card{ cursor: pointer; }
+.node-card rect{ stroke-width: 1.5px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.18)); }
+.node-card text{ font-family: var(--font-body); pointer-events: none; }
+.node-card .name{ font-size: 12px; font-weight: 700; fill: #fff; }
+.node-card .years{ font-size: 10.5px; fill: rgba(255,255,255,.85); }
+.node-card.focus rect{ stroke: var(--tree-focus-ring); stroke-width: 3px; }
+.edge-parent{ fill: none; stroke: var(--tree-edge); stroke-width: 1.6px; }
+.edge-spouse{ fill: none; stroke: var(--tree-edge-spouse); stroke-width: 2px; }
+.edge-sibling{ fill: none; stroke: var(--tree-edge); stroke-width: 1.4px; stroke-dasharray: 3,3; }
+
+/* ---------------------------------------------------------------------
+   8. MODALE
+--------------------------------------------------------------------- */
+.modal-overlay{
+  position: fixed; inset: 0; background: rgba(10, 12, 18, 0.5); display: flex;
+  align-items: center; justify-content: center; z-index: 100; padding: 16px;
+}
+.modal-overlay.hidden{ display: none; }
+.modal{
+  position: relative;
+  background: var(--color-surface-solid);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  width: 540px; max-width: 100%; max-height: 88vh; overflow-y: auto;
+  padding: 24px; box-shadow: var(--shadow-lg);
+  animation: rise 320ms var(--ease) both;
+}
+.modal h2{ margin: 0 0 4px; font-size: 17px; }
+.modal .modal-sub{ font-size: 12px; color: var(--color-text-muted); margin-bottom: var(--space-3); }
+.form-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.form-grid .full{ grid-column: 1 / -1; }
+.fact-editor-row{ display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; margin-bottom: 6px; align-items: center; }
+.modal-footer{ display: flex; justify-content: flex-end; gap: 8px; margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+.close-x{
+  position: absolute; top: 14px; right: 16px; background: none; border: none; font-size: 20px;
+  cursor: pointer; color: var(--color-text-muted); line-height: 1; padding: 4px; border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+.close-x:hover{ color: var(--color-text); background: var(--color-bg-alt); }
+
+/* ---------------------------------------------------------------------
+   9. TOAST
+--------------------------------------------------------------------- */
+#toast{
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--color-surface-solid); color: var(--color-text);
+  border: 1px solid var(--color-border);
+  padding: 10px 18px; border-radius: var(--radius-pill); font-size: 13px;
+  box-shadow: var(--shadow-lg);
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--transition-base), transform var(--transition-base); z-index: 200;
+}
+#toast.show{ opacity: 1; transform: translateX(-50%) translateY(-6px); }
+
+.hidden{ display: none !important; }
+
+/* ---------------------------------------------------------------------
+   10. MIKROINTERAKCJE / ANIMACJE
+--------------------------------------------------------------------- */
+@keyframes rise{
+  from{ opacity: 0; transform: translateY(14px); }
+  to{ opacity: 1; transform: translateY(0); }
+}
+
+/* ---------------------------------------------------------------------
+   11. MEDIA QUERIES — MOBILE FIRST (uzupełnienie sekcji 5)
+--------------------------------------------------------------------- */
+@media (min-width: 640px){
+  .modal{ padding: 26px; }
+}
+
+/* ---------------------------------------------------------------------
+   12. DOSTĘPNOŚĆ
+--------------------------------------------------------------------- */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+li:focus-visible{
+  outline: 2px solid var(--accent-1);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
-  header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:.3px;}
-  header .sub{font-size:12px;opacity:.75;margin-top:2px;}
-  .layout{
-    display:grid;
-    grid-template-columns: 280px 1fr 320px;
-    height:calc(100vh - 60px);
-  }
-  .mobile-tabs{ display:none; }
-  @media (max-width: 980px){
-    .layout{ grid-template-columns: 1fr; height:calc(100vh - 60px - 52px); }
-    #sidebar, #detailsPanel{ max-height:none; height:100%; }
-    main{ height:100%; min-height:0; }
-    header{ flex-wrap:wrap; gap:8px; }
-    .mobile-tabs{
-      display:flex; position:sticky; top:60px; z-index:40; background:var(--panel);
-      border-bottom:1px solid var(--line); box-shadow:var(--shadow);
-    }
-    .mobile-tabs button{
-      flex:1; padding:12px 6px; background:none; border:none; font-size:13px; font-weight:600;
-      color:var(--muted); cursor:pointer; border-bottom:3px solid transparent;
-    }
-    .mobile-tabs button.active{ color:var(--accent-dark); border-bottom-color:var(--accent); }
-    .tab-panel{ display:none; }
-    .tab-panel.active{ display:block; }
-    main.tab-panel.active{ display:block; height:100%; }
-  }
-  aside{
-    background:var(--panel);
-    border-right:1px solid var(--line);
-    padding:14px;
-    overflow-y:auto;
-  }
-  #detailsPanel{ border-right:none; border-left:1px solid var(--line); }
-  main{
-    position:relative;
-    overflow:hidden;
-    background:
-      radial-gradient(circle at 1px 1px, #e4dcc7 1px, transparent 1px) 0 0/22px 22px,
-      var(--bg);
-  }
-  #treeContainer{ width:100%; height:100%; position:relative; }
-  svg#treeSvg{ width:100%; height:100%; cursor:grab; }
-  svg#treeSvg:active{ cursor:grabbing; }
-  #emptyState{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-    flex-direction:column; gap:10px; color:var(--muted); text-align:center; padding:20px;
-  }
-  #emptyState button{ margin-top:6px; }
-  .btn{
-    background:var(--accent);
-    color:#fff;
-    border:none;
-    padding:9px 14px;
-    border-radius:8px;
-    font-size:13px;
-    cursor:pointer;
-    font-weight:600;
-    transition:background .15s;
-  }
-  .btn:hover{ background:var(--accent-dark); }
-  .btn.secondary{ background:transparent; color:var(--accent-dark); border:1px solid var(--line); }
-  .btn.secondary:hover{ background:#efe9da; }
-  .btn.danger{ background:var(--danger); }
-  .btn.small{ padding:6px 10px; font-size:12px; }
-  .btn:disabled{ opacity:.5; cursor:not-allowed; }
-  #searchBox{
-    width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
-    font-size:13px; margin-bottom:10px; background:#fff;
-  }
-  #btnAddPerson{ width:100%; margin-bottom:14px; }
-  #peopleList{ list-style:none; margin:0; padding:0; }
-  #peopleList li{
-    padding:8px 10px; border-radius:8px; cursor:pointer; font-size:13px;
-    display:flex; justify-content:space-between; align-items:center; gap:6px;
-    margin-bottom:2px;
-  }
-  #peopleList li:hover{ background:#efe9da; }
-  #peopleList li.active{ background:var(--accent); color:#fff; }
-  #peopleList li .years{ font-size:11px; opacity:.7; white-space:nowrap; }
-  .sidebar-actions{ margin-top:16px; padding-top:14px; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
-  .import-label{
-    display:inline-block; text-align:center; background:transparent; color:var(--accent-dark);
-    border:1px solid var(--line); padding:9px 14px; border-radius:8px; font-size:13px; cursor:pointer; font-weight:600;
-  }
-  .import-label:hover{ background:#efe9da; }
-  h2.panel-title{ font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; }
-  #detailsContent{ font-size:13px; }
-  .person-card-header{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-  .avatar{
-    width:46px; height:46px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-    color:#fff; font-weight:700; font-size:16px; flex-shrink:0;
-  }
-  .fact-row{ display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px dashed var(--line); }
-  .fact-row .k{ color:var(--muted); }
-  .section-block{ margin-top:16px; }
-  .section-block h3{ font-size:12px; text-transform:uppercase; color:var(--muted); margin:0 0 8px; letter-spacing:.05em; }
-  .rel-chip{
-    display:inline-flex; align-items:center; gap:6px; background:#efe9da; border-radius:16px;
-    padding:5px 10px; font-size:12px; margin:0 6px 6px 0; cursor:pointer;
-  }
-  .rel-chip:hover{ background:#e2d9c3; }
-  .rel-chip .x{ opacity:.5; font-weight:700; }
-  .rel-chip .x:hover{ opacity:1; color:var(--danger); }
-  .actions-row{ display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
-  .external-search{ margin-top:16px; padding:12px; background:#f2ecdd; border-radius:10px; border:1px solid var(--line); }
-  .external-search p{ font-size:11.5px; color:var(--muted); margin:0 0 10px; line-height:1.5; }
-  .external-search .links{ display:flex; flex-direction:column; gap:6px; }
-  .modal-overlay{
-    position:fixed; inset:0; background:rgba(47,42,34,0.45); display:flex; align-items:center; justify-content:center;
-    z-index:100; padding:16px;
-  }
-  .modal-overlay.hidden{ display:none; }
-  .modal{
-    background:#fff; border-radius:var(--radius); width:520px; max-width:100%; max-height:88vh; overflow-y:auto;
-    padding:22px; box-shadow:0 10px 40px rgba(0,0,0,.25);
-  }
-  .modal h2{ margin:0 0 4px; font-size:17px; }
-  .modal .modal-sub{ font-size:12px; color:var(--muted); margin-bottom:16px; }
-  .form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px 12px; }
-  .form-grid .full{ grid-column:1/-1; }
-  label{ font-size:11.5px; color:var(--muted); font-weight:600; display:block; margin-bottom:4px; }
-  input[type=text], input[type=date], select, textarea{
-    width:100%; padding:8px 9px; border:1px solid var(--line); border-radius:7px; font-size:13px; font-family:inherit; background:#fdfbf6;
-  }
-  textarea{ resize:vertical; min-height:50px; }
-  .field{ margin-bottom:4px; }
-  .fact-editor-row{ display:grid; grid-template-columns: 1fr 1fr 1fr auto; gap:6px; margin-bottom:6px; align-items:center; }
-  .modal-footer{ display:flex; justify-content:flex-end; gap:8px; margin-top:18px; padding-top:14px; border-top:1px solid var(--line); }
-  .close-x{ position:absolute; top:14px; right:16px; background:none; border:none; font-size:20px; cursor:pointer; color:var(--muted); }
-  .modal{ position:relative; }
-  #toast{
-    position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--accent-dark); color:#fff;
-    padding:10px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .25s, transform .25s; z-index:200;
-  }
-  #toast.show{ opacity:1; transform:translateX(-50%) translateY(-6px); }
-  .zoom-controls{ position:absolute; bottom:16px; right:16px; display:flex; flex-direction:column; gap:6px; z-index:10; }
-  .zoom-controls button{
-    width:34px; height:34px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; font-size:16px;
-    box-shadow:var(--shadow);
-  }
-  .node-card{ cursor:pointer; }
-  .node-card rect{ stroke-width:1.5px; filter:drop-shadow(0 1px 2px rgba(0,0,0,.15)); }
-  .node-card text{ font-family:inherit; pointer-events:none; }
-  .node-card .name{ font-size:12px; font-weight:700; fill:#fff; }
-  .node-card .years{ font-size:10.5px; fill:rgba(255,255,255,.85); }
-  .node-card.focus rect{ stroke:#ffd76a; stroke-width:3px; }
-  .edge-parent{ fill:none; stroke:#8a7f66; stroke-width:1.6px; }
-  .edge-spouse{ fill:none; stroke:#a45c40; stroke-width:2px; }
-  .edge-sibling{ fill:none; stroke:#8a7f66; stroke-width:1.4px; stroke-dasharray:3,3; }
-  .hidden{ display:none !important; }
+}
 </style>
 </head>
 <body>
 <header>
   <div>
-    <h1>🌳 Moje Drzewo Genealogiczne</h1>
-    <div class="sub">Twórz, rozwijaj i wizualizuj historię swojej rodziny</div>
+    <h1>🌳 Moje <span class="accent">Drzewo Genealogiczne</span></h1>
+    <div class="sub">Twórz, rozwijaj i wizualizuj historię swojej rodziny — offline, dane tylko w Twojej przeglądarce</div>
   </div>
   <div class="actions-row" style="margin-top:0;">
-    <button class="btn small" id="btnSearchArchives" style="background:var(--accent-2);">🔎 Szukaj przodków w bazach</button>
+    <button class="btn small" id="btnSearchArchives">🔎 Szukaj przodków w bazach</button>
     <button class="btn secondary small" id="btnHelp">Jak to działa?</button>
+    <!-- Przełącznik motywu: JS zmienia aria-pressed i ikonę -->
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Przełącz tryb ciemny/jasny">
+      <svg class="theme-toggle__icon theme-toggle__icon--sun" width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M12 2.5v2.5M12 19v2.5M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2.5 12H5M19 12h2.5M4.2 19.8L6 18M18 6l1.8-1.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <svg class="theme-toggle__icon theme-toggle__icon--moon" width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+      </svg>
+    </button>
   </div>
 </header>
 
@@ -245,7 +589,7 @@
   <aside id="detailsPanel" class="tab-panel" data-tab="szczegoly">
     <h2 class="panel-title">Szczegóły osoby</h2>
     <div id="detailsContent">
-      <p style="color:var(--muted); font-size:13px;">Wybierz osobę z listy lub na drzewie, aby zobaczyć jej dane, fakty i powiązania rodzinne.</p>
+      <p style="color:var(--color-text-muted); font-size:13px;">Wybierz osobę z listy lub na drzewie, aby zobaczyć jej dane, fakty i powiązania rodzinne.</p>
     </div>
   </aside>
 </div>
@@ -306,7 +650,7 @@
         <option value="">— wybierz z listy już dodanych osób —</option>
       </select>
     </div>
-    <div style="text-align:center; margin:10px 0; color:var(--muted); font-size:12px;">— lub —</div>
+    <div style="text-align:center; margin:10px 0; color:var(--color-text-muted); font-size:12px;">— lub —</div>
     <button class="btn secondary" id="btnCreateNewRelative" type="button" style="width:100%;">+ Utwórz nową osobę i połącz</button>
     <div class="modal-footer">
       <button class="btn secondary" data-close="relationModalOverlay">Anuluj</button>
@@ -325,7 +669,7 @@
       <div class="field"><label>Imię</label><input type="text" id="s_imie" placeholder="np. Jan"></div>
       <div class="field"><label>Nazwisko</label><input type="text" id="s_nazwisko" placeholder="np. Kowalski"></div>
     </div>
-    <p style="font-size:11.5px; color:var(--muted); line-height:1.5; margin-top:14px;">
+    <p style="font-size:11.5px; color:var(--color-text-muted); line-height:1.5; margin-top:14px;">
       To zewnętrzne, niezależne serwisy (nie część tej aplikacji) — otworzą się w nowej karcie z podstawionym nazwiskiem. Czasem trzeba będzie doprecyzować wyszukiwanie ręcznie na ich stronie.
     </p>
     <div class="external-search" style="margin-top:10px;">
@@ -347,6 +691,35 @@
 <div id="toast"></div>
 
 <script>
+/* ============================= MOTYW (DARK / LIGHT) ============================= */
+(function () {
+  'use strict';
+  var STORAGE_KEY_THEME = 'drzewo-genealogiczne-theme';
+  var root = document.documentElement;
+  var toggleBtn = document.getElementById('theme-toggle');
+
+  function applyTheme(theme) {
+    root.setAttribute('data-theme', theme);
+    if (toggleBtn) toggleBtn.setAttribute('aria-pressed', String(theme === 'dark'));
+    // Po zmianie motywu odśwież drzewo, żeby węzły/krawędzie pobrały nowe kolory z CSS var.
+    if (typeof renderTree === 'function') requestAnimationFrame(renderTree);
+  }
+  function toggleTheme() {
+    var current = root.getAttribute('data-theme');
+    var next = current === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    localStorage.setItem(STORAGE_KEY_THEME, next);
+  }
+  // Stan początkowy już ustawiony w anty-FOUC skrypcie w <head> — tu tylko dopinamy aria-pressed.
+  if (toggleBtn) {
+    toggleBtn.setAttribute('aria-pressed', String(root.getAttribute('data-theme') === 'dark'));
+    toggleBtn.addEventListener('click', toggleTheme);
+  }
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
+    if (!localStorage.getItem(STORAGE_KEY_THEME)) applyTheme(e.matches ? 'dark' : 'light');
+  });
+})();
+
 /* ============================= STATE & PERSISTENCE ============================= */
 const STORAGE_KEY = 'genealogia_drzewo_v1';
 let state = { people: {}, focusId: null };
@@ -369,6 +742,30 @@ function showToast(msg){
   t.classList.add('show');
   clearTimeout(showToast._t);
   showToast._t = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+/* ============================= KOLORY MOTYWU DLA DRZEWA (SVG) =============================
+   SVG nie odczytuje CSS var() w atrybutach fill ustawianych z JS, więc pobieramy
+   aktualne wartości bezpośrednio z obliczonych stylów <html> (data-theme) i cache'ujemy
+   je przy każdym renderze — dzięki temu węzły/krawędzie/tło podążają za motywem. */
+function themeVar(name){
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function treeColors(){
+  return {
+    male: themeVar('--male'),
+    female: themeVar('--female'),
+    unknown: themeVar('--unknown'),
+    focus: themeVar('--tree-focus-ring'),
+    edgeParent: themeVar('--tree-edge'),
+    edgeSpouse: themeVar('--tree-edge-spouse'),
+    edgeSibling: themeVar('--tree-edge'),
+    canvasBg: themeVar('--tree-canvas-bg'),
+    ink: themeVar('--tree-ink')
+  };
+}
+function personColor(person, colors){
+  return person.plec==='M' ? colors.male : person.plec==='K' ? colors.female : colors.unknown;
 }
 
 /* ============================= DATA MODEL HELPERS ============================= */
@@ -396,11 +793,6 @@ function yearOf(dateStr){
   if(!dateStr) return null;
   const m = String(dateStr).match(/^(\d{4})/);
   return m ? m[1] : null;
-}
-function lifeSpan(p){
-  const b = yearOf(p.dataUrodzenia), d = yearOf(p.dataSmierci);
-  if(!b && !d) return '';
-  return `${b||'?'} – ${d||(p.zmarl ? '?' : '')}`.trim().replace(/–\s*$/, '– obecnie'.slice(0,0)) || '';
 }
 function lifeSpanLabel(p){
   const b = yearOf(p.dataUrodzenia), d = yearOf(p.dataSmierci);
@@ -506,17 +898,18 @@ function renderDetails(){
   const container = document.getElementById('detailsContent');
   const p = state.people[state.focusId];
   if(!p){
-    container.innerHTML = '<p style="color:var(--muted); font-size:13px;">Wybierz osobę z listy lub na drzewie, aby zobaczyć jej dane, fakty i powiązania rodzinne.</p>';
+    container.innerHTML = '<p style="color:var(--color-text-muted); font-size:13px;">Wybierz osobę z listy lub na drzewie, aby zobaczyć jej dane, fakty i powiązania rodzinne.</p>';
     return;
   }
-  const color = p.plec==='M' ? 'var(--male)' : p.plec==='K' ? 'var(--female)' : 'var(--unknown)';
+  const colors = treeColors();
+  const color = personColor(p, colors);
   const initials = (p.imie[0]||'') + (p.nazwisko[0]||'');
   let html = '';
   html += `<div class="person-card-header">
       <div class="avatar" style="background:${color}">${escapeHtml(initials.toUpperCase()||'?')}</div>
       <div>
         <div style="font-weight:700; font-size:15px;">${escapeHtml(fullName(p))}</div>
-        <div style="font-size:12px; color:var(--muted);">${lifeSpanLabel(p) || 'brak dat'}</div>
+        <div style="font-size:12px; color:var(--color-text-muted);">${lifeSpanLabel(p) || 'brak dat'}</div>
       </div>
     </div>`;
 
@@ -544,22 +937,22 @@ function renderDetails(){
 
   // relationships
   html += '<div class="section-block"><h3>Rodzice</h3><div>';
-  if(p.rodzice.length===0) html += '<span style="color:var(--muted); font-size:12px;">brak dodanych</span>';
+  if(p.rodzice.length===0) html += '<span style="color:var(--color-text-muted); font-size:12px;">brak dodanych</span>';
   p.rodzice.forEach(id=>{ html += relChip(id, 'rodzic', p.id); });
   html += '</div></div>';
 
   html += '<div class="section-block"><h3>Małżonkowie / partnerzy</h3><div>';
-  if(p.malzonkowie.length===0) html += '<span style="color:var(--muted); font-size:12px;">brak dodanych</span>';
+  if(p.malzonkowie.length===0) html += '<span style="color:var(--color-text-muted); font-size:12px;">brak dodanych</span>';
   p.malzonkowie.forEach(m=>{ html += relChip(m.id, 'malzonek', p.id); });
   html += '</div></div>';
 
   html += '<div class="section-block"><h3>Dzieci</h3><div>';
-  if(p.dzieci.length===0) html += '<span style="color:var(--muted); font-size:12px;">brak dodanych</span>';
+  if(p.dzieci.length===0) html += '<span style="color:var(--color-text-muted); font-size:12px;">brak dodanych</span>';
   p.dzieci.forEach(id=>{ html += relChip(id, 'dziecko', p.id); });
   html += '</div></div>';
 
   html += '<div class="section-block"><h3>Rodzeństwo</h3><div>';
-  if(p.rodzenstwo.length===0) html += '<span style="color:var(--muted); font-size:12px;">brak dodanych</span>';
+  if(p.rodzenstwo.length===0) html += '<span style="color:var(--color-text-muted); font-size:12px;">brak dodanych</span>';
   p.rodzenstwo.forEach(id=>{ html += relChip(id, 'rodzenstwo', p.id); });
   html += '</div></div>';
 
@@ -699,6 +1092,7 @@ function renderTree(){
   }
 
   const {rows, parentEdges, spouseEdges, siblingEdges} = computeLayout(state.focusId);
+  const colors = treeColors();
 
   const spacingX = 190, spacingY = 130, nodeW = 150, nodeH = 62;
   const pos = new Map();
@@ -738,12 +1132,12 @@ function renderTree(){
   pos.forEach((xy,id)=>{
     const person = state.people[id];
     if(!person) return;
-    const color = person.plec==='M' ? '#3f6e8c' : person.plec==='K' ? '#a15c7e' : '#8a8371';
+    const color = personColor(person, colors);
     const g = nodeG.append('g')
       .attr('class', 'node-card' + (id===state.focusId ? ' focus' : ''))
       .attr('transform', `translate(${xy.x - nodeW/2},${xy.y - nodeH/2})`)
       .on('click', ()=>{ state.focusId = id; saveState(); renderAll(); });
-    g.append('rect').attr('width', nodeW).attr('height', nodeH).attr('rx', 10).attr('fill', color);
+    g.append('rect').attr('width', nodeW).attr('height', nodeH).attr('rx', 12).attr('fill', color);
     g.append('text').attr('class','name').attr('x', nodeW/2).attr('y', 26).attr('text-anchor','middle')
       .text(trimText(fullName(person), 20));
     g.append('text').attr('class','years').attr('x', nodeW/2).attr('y', 44).attr('text-anchor','middle')
@@ -775,9 +1169,11 @@ function trimText(t, n){ return t.length>n ? t.slice(0,n-1)+'…' : t; }
 /* ============================= EKSPORT DRZEWA DO PDF ============================= */
 // Buduje samodzielny, niezależny od bieżącego przybliżenia/przesunięcia widok SVG
 // całego (połączonego z osobą centralną) drzewa — używany wyłącznie do eksportu.
+// Kolory pobierane są z aktualnego motywu (jasny/ciemny), tak jak widok na ekranie.
 function buildTreeExportSvg(){
   if(!state.focusId || !state.people[state.focusId]) return null;
   const {rows, parentEdges, spouseEdges, siblingEdges} = computeLayout(state.focusId);
+  const colors = treeColors();
 
   const spacingX = 190, spacingY = 130, nodeW = 150, nodeH = 62;
   const pos = new Map();
@@ -821,13 +1217,13 @@ function buildTreeExportSvg(){
   const bg = document.createElementNS(svgNS, 'rect');
   bg.setAttribute('x', minX); bg.setAttribute('y', minY);
   bg.setAttribute('width', width); bg.setAttribute('height', height);
-  bg.setAttribute('fill', '#f6f1e7');
+  bg.setAttribute('fill', colors.canvasBg);
   svg.appendChild(bg);
 
   const title = document.createElementNS(svgNS, 'text');
   title.setAttribute('x', minX + width/2); title.setAttribute('y', minY + 28);
   title.setAttribute('text-anchor', 'middle'); title.setAttribute('font-size', String(titleFontSize));
-  title.setAttribute('font-weight', '700'); title.setAttribute('fill', '#2f2a22');
+  title.setAttribute('font-weight', '700'); title.setAttribute('fill', colors.ink);
   title.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
   title.textContent = titleStr;
   svg.appendChild(title);
@@ -839,7 +1235,7 @@ function buildTreeExportSvg(){
     const midY = p.y + nodeH/2 + (c.y - nodeH/2 - (p.y+nodeH/2))/2;
     const path = document.createElementNS(svgNS, 'path');
     path.setAttribute('d', `M${p.x},${p.y+nodeH/2} V${midY} H${c.x} V${c.y-nodeH/2}`);
-    path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#8a7f66'); path.setAttribute('stroke-width', '1.6');
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', colors.edgeParent); path.setAttribute('stroke-width', '1.6');
     edgeG.appendChild(path);
   });
   spouseEdges.forEach(([a,b])=>{
@@ -848,7 +1244,7 @@ function buildTreeExportSvg(){
     const line = document.createElementNS(svgNS, 'line');
     line.setAttribute('x1', pa.x); line.setAttribute('y1', pa.y);
     line.setAttribute('x2', pb.x); line.setAttribute('y2', pb.y);
-    line.setAttribute('stroke', '#a45c40'); line.setAttribute('stroke-width', '2');
+    line.setAttribute('stroke', colors.edgeSpouse); line.setAttribute('stroke-width', '2');
     edgeG.appendChild(line);
   });
   siblingEdges.forEach(([a,b])=>{
@@ -857,7 +1253,7 @@ function buildTreeExportSvg(){
     const line = document.createElementNS(svgNS, 'line');
     line.setAttribute('x1', pa.x); line.setAttribute('y1', pa.y-nodeH/2-6);
     line.setAttribute('x2', pb.x); line.setAttribute('y2', pb.y-nodeH/2-6);
-    line.setAttribute('stroke', '#8a7f66'); line.setAttribute('stroke-width', '1.4'); line.setAttribute('stroke-dasharray', '3,3');
+    line.setAttribute('stroke', colors.edgeSibling); line.setAttribute('stroke-width', '1.4'); line.setAttribute('stroke-dasharray', '3,3');
     edgeG.appendChild(line);
   });
   svg.appendChild(edgeG);
@@ -866,13 +1262,13 @@ function buildTreeExportSvg(){
   pos.forEach((xy,id)=>{
     const person = state.people[id];
     if(!person) return;
-    const color = person.plec==='M' ? '#3f6e8c' : person.plec==='K' ? '#a15c7e' : '#8a8371';
+    const color = personColor(person, colors);
     const g = document.createElementNS(svgNS, 'g');
     g.setAttribute('transform', `translate(${xy.x-nodeW/2},${xy.y-nodeH/2})`);
     const rect = document.createElementNS(svgNS, 'rect');
-    rect.setAttribute('width', nodeW); rect.setAttribute('height', nodeH); rect.setAttribute('rx', 10);
+    rect.setAttribute('width', nodeW); rect.setAttribute('height', nodeH); rect.setAttribute('rx', 12);
     rect.setAttribute('fill', color);
-    if(id === state.focusId){ rect.setAttribute('stroke', '#ffd76a'); rect.setAttribute('stroke-width', '3'); }
+    if(id === state.focusId){ rect.setAttribute('stroke', colors.focus); rect.setAttribute('stroke-width', '3'); }
     g.appendChild(rect);
     const nameText = document.createElementNS(svgNS, 'text');
     nameText.setAttribute('x', nodeW/2); nameText.setAttribute('y', 26); nameText.setAttribute('text-anchor', 'middle');
@@ -890,7 +1286,7 @@ function buildTreeExportSvg(){
   });
   svg.appendChild(nodeG);
 
-  return { svg, width, height };
+  return { svg, width, height, canvasBg: colors.canvasBg };
 }
 
 function exportTreeToPDF(){
@@ -903,7 +1299,7 @@ function exportTreeToPDF(){
     showToast('Brak danych do eksportu — wybierz osobę na drzewie.');
     return;
   }
-  const { svg, width, height } = built;
+  const { svg, width, height, canvasBg } = built;
 
   const serializer = new XMLSerializer();
   const svgStr = serializer.serializeToString(svg);
@@ -918,7 +1314,7 @@ function exportTreeToPDF(){
       canvas.width = Math.max(1, Math.round(width*scale));
       canvas.height = Math.max(1, Math.round(height*scale));
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#f6f1e7';
+      ctx.fillStyle = canvasBg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(url);

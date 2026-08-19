@@ -122,6 +122,12 @@
   --tree-edge-spouse: var(--accent-3);
   --tree-focus-ring: var(--accent-2);
 
+  /* Rzeczywiste wysokości nagłówka i zakładek mobilnych — ustawiane z JS
+     (syncLayoutHeightVars), bo nagłówek może się zawijać na wąskich ekranach.
+     Wartości poniżej to tylko bezpieczny fallback przed pierwszym pomiarem. */
+  --header-h: 66px;
+  --tabs-h: 52px;
+
   color-scheme: light;
 }
 
@@ -298,16 +304,16 @@ header .actions-row{ margin-top: 0; align-items: center; }
   grid-template-columns: 280px 1fr 320px;
   gap: var(--space-2);
   padding: var(--space-2);
-  height: calc(100vh - 66px);
+  min-height: calc(100vh - var(--header-h));
 }
 .mobile-tabs{ display: none; }
 @media (max-width: 980px){
-  .layout{ grid-template-columns: 1fr; gap: 0; padding: 0; height: calc(100vh - 66px - 52px); }
+  .layout{ grid-template-columns: 1fr; gap: 0; padding: 0; height: calc(100vh - var(--header-h) - var(--tabs-h)); min-height: 0; }
   #sidebar, #detailsPanel{ max-height: none; height: 100%; border-radius: 0; }
   main{ height: 100%; min-height: 0; border-radius: 0; }
   header{ gap: 8px; }
   .mobile-tabs{
-    display: flex; position: sticky; top: 66px; z-index: 40;
+    display: flex; position: sticky; top: var(--header-h); z-index: 40;
     background: var(--color-surface);
     backdrop-filter: blur(var(--blur-md));
     -webkit-backdrop-filter: blur(var(--blur-md));
@@ -356,6 +362,11 @@ h2.panel-title{ font-size: 13px; text-transform: uppercase; letter-spacing: .08e
   margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border);
   display: flex; flex-direction: column; gap: 8px;
 }
+.backup-status{
+  font-size: 11.5px; color: var(--color-text-subtle); text-align: center;
+  padding: 6px 4px 2px;
+}
+.backup-status.stale{ color: var(--danger); font-weight: 600; }
 .import-label{
   display: inline-block; text-align: center;
   background: var(--color-surface-solid); color: var(--color-text);
@@ -488,6 +499,107 @@ svg#treeSvg:active{ cursor: grabbing; }
 .hidden{ display: none !important; }
 
 /* ---------------------------------------------------------------------
+   9b. SOCIAL FAB + LINKI SPOŁECZNOŚCIOWE + STOPKA
+   Obowiązkowy element na KAŻDEJ stronie w tym design systemie
+   (patrz claude/styl-wizualny.md i instrukcje projektu). Dwie części:
+
+   a) .social-fab — stały, statyczny pasek z linkami do wszystkich profili
+      autora. Bez JS do rozwijania — to zwykła lista linków, zawsze widoczna.
+      Mobile (<768px): pozioma pigułka na dole, wyśrodkowana.
+      Desktop (≥768px): pionowa kolumna, przyklejona do lewej krawędzi,
+      wyśrodkowana w pionie.
+
+   b) .social-links — ten sam zestaw linków jako rząd ikon w stopce.
+
+   Aby dodać/usunąć platformę: dodaj/usuń <li> w OBU miejscach (.social-fab
+   i .social-links w stopce) — muszą zawsze być identyczne.
+--------------------------------------------------------------------- */
+.social-fab{
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.4rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  box-shadow: var(--shadow-lg);
+
+  /* Mobile: pozioma pigułka, wyśrodkowana na dole ekranu */
+  left: 50%;
+  bottom: var(--space-2);
+  transform: translateX(-50%);
+  border-radius: var(--radius-pill);
+  max-width: calc(100vw - var(--space-3));
+  overflow-x: auto;
+}
+.social-fab__list{ display: flex; gap: 0.35rem; }
+.social-fab__link{
+  width: 36px; height: 36px; flex-shrink: 0;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  background: var(--color-surface-solid);
+  border: 1px solid var(--color-border);
+  transition: color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+.social-fab__link:hover{
+  color: #fff; background: var(--gradient-accent);
+  transform: translateY(-2px); box-shadow: var(--shadow-glow);
+}
+@media (min-width: 768px){
+  .social-fab{
+    left: var(--space-2); bottom: auto; top: 50%; transform: translateY(-50%);
+    border-radius: var(--radius-lg); max-width: none; overflow-x: visible;
+  }
+  .social-fab__list{ flex-direction: column; }
+  /* Rezerwujemy miejsce po lewej, żeby pionowy Social FAB nie zasłaniał
+     panelu "Osoby" — jedyne miejsce w tej apce, gdzie FAB koliduje z UI. */
+  .layout{ padding-left: calc(var(--space-2) + 64px); }
+}
+@media (max-width: 767.98px){
+  /* Na mobile FAB to pozioma pigułka na samym dole ekranu — podnosimy
+     elementy, które mogłyby się pod nią schować (kontrolki zoomu, toast). */
+  .zoom-controls{ bottom: 80px; }
+  .sidebar-actions{ padding-bottom: 56px; }
+  #toast{ bottom: 76px; }
+}
+
+.footer{
+  background: var(--color-bg-alt);
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-4) var(--space-3) var(--space-3);
+  margin-top: var(--space-3);
+}
+.footer__inner{
+  max-width: 720px; margin-inline: auto; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+}
+.footer__brand{ font-family: var(--font-heading); font-weight: 700; font-size: 14px; }
+.footer__brand .accent{
+  background: var(--gradient-accent); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.footer__inner p{ color: var(--color-text-muted); font-size: 12.5px; max-width: 480px; }
+.social-links{ display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; }
+.social-links__link{
+  width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%;
+  font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700;
+  color: var(--color-text-muted); background: var(--color-bg); border: 1px solid var(--color-border);
+  transition: color var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+.social-links__link:hover{ color: var(--accent-1); border-color: var(--accent-1); transform: translateY(-2px); }
+.footer__bottom{
+  border-top: 1px solid var(--color-border); margin-top: var(--space-2); padding-top: var(--space-2);
+  font-size: 11.5px; color: var(--color-text-subtle); text-align: center; width: 100%;
+}
+.footer__portfolio{ margin-top: 0.3rem; }
+.footer__portfolio a{ color: var(--accent-1); font-weight: 600; }
+.footer__portfolio a:hover{ text-decoration: underline; }
+
+/* ---------------------------------------------------------------------
    10. MIKROINTERAKCJE / ANIMACJE
 --------------------------------------------------------------------- */
 @keyframes rise{
@@ -561,11 +673,13 @@ li:focus-visible{
     <button class="btn" id="btnAddPerson">+ Dodaj osobę</button>
     <ul id="peopleList"></ul>
     <div class="sidebar-actions">
-      <button class="btn secondary" id="btnExport">⬇ Eksportuj dane (JSON)</button>
+      <button class="btn secondary" id="btnExport">⬇ Eksportuj dane (JSON) — kopia zapasowa</button>
       <label class="import-label">⬆ Importuj dane (JSON)
         <input type="file" id="importFile" accept="application/json" hidden>
       </label>
+      <button class="btn secondary" id="btnExportGedcom">🧬 Eksportuj do GEDCOM (.ged)</button>
       <button class="btn secondary" id="btnExportPdf">🖨 Eksportuj drzewo do PDF</button>
+      <div class="backup-status" id="backupStatus"></div>
     </div>
   </aside>
 
@@ -593,6 +707,51 @@ li:focus-visible{
     </div>
   </aside>
 </div>
+
+<!-- ===========================================================
+     SOCIAL FAB — stały, statyczny pasek z linkami autora.
+     OBOWIĄZKOWY na każdej stronie w tym design systemie (patrz
+     claude/styl-wizualny.md). Bez JS do rozwijania — zwykła lista
+     linków, zawsze widoczna. Mobile: pigułka na dole. Desktop
+     (≥768px): pionowa kolumna przy lewej krawędzi.
+     Ten sam zestaw linków musi być też w stopce (.social-links).
+============================================================ -->
+<nav class="social-fab" aria-label="Media społecznościowe">
+  <ul class="social-fab__list">
+    <li><a class="social-fab__link" href="https://x.com/wasiak_dsm" target="_blank" rel="noopener noreferrer" aria-label="X (Twitter)">X</a></li>
+    <li><a class="social-fab__link" href="https://www.linkedin.com/in/pwasiak30" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">in</a></li>
+    <li><a class="social-fab__link" href="https://www.youtube.com/@psychologia.wasiak" target="_blank" rel="noopener noreferrer" aria-label="YouTube">YT</a></li>
+    <li><a class="social-fab__link" href="https://www.instagram.com/psychologia.wasiak/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">IG</a></li>
+    <li><a class="social-fab__link" href="https://www.facebook.com/psychologia.wasiak" target="_blank" rel="noopener noreferrer" aria-label="Facebook">FB</a></li>
+    <li><a class="social-fab__link" href="https://github.com/pwasiak30" target="_blank" rel="noopener noreferrer" aria-label="GitHub">GH</a></li>
+    <li><a class="social-fab__link" href="https://mastodon.social/@s3in610" target="_blank" rel="noopener noreferrer" aria-label="Mastodon">MA</a></li>
+    <li><a class="social-fab__link" href="https://linktree.wasiakpawel.pl/" target="_blank" rel="noopener noreferrer" aria-label="Linktree">LT</a></li>
+  </ul>
+</nav>
+
+<!-- ===========================================================
+     STOPKA — odwołanie do portfolio + rząd ikon social (obowiązkowe)
+============================================================ -->
+<footer class="footer" id="footer">
+  <div class="footer__inner">
+    <div class="footer__brand">🌳 Moje <span class="accent">Drzewo Genealogiczne</span></div>
+    <p>Aplikacja działa w pełni offline — Twoje dane genealogiczne zostają wyłącznie w tej przeglądarce. Pamiętaj o regularnych kopiach zapasowych (JSON) i eksporcie do GEDCOM, jeśli chcesz przenieść drzewo do innego programu genealogicznego.</p>
+    <ul class="social-links" aria-label="Media społecznościowe">
+      <li><a class="social-links__link" href="https://x.com/wasiak_dsm" target="_blank" rel="noopener noreferrer" aria-label="X (Twitter)">X</a></li>
+      <li><a class="social-links__link" href="https://www.linkedin.com/in/pwasiak30" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">in</a></li>
+      <li><a class="social-links__link" href="https://www.youtube.com/@psychologia.wasiak" target="_blank" rel="noopener noreferrer" aria-label="YouTube">YT</a></li>
+      <li><a class="social-links__link" href="https://www.instagram.com/psychologia.wasiak/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">IG</a></li>
+      <li><a class="social-links__link" href="https://www.facebook.com/psychologia.wasiak" target="_blank" rel="noopener noreferrer" aria-label="Facebook">FB</a></li>
+      <li><a class="social-links__link" href="https://github.com/pwasiak30" target="_blank" rel="noopener noreferrer" aria-label="GitHub">GH</a></li>
+      <li><a class="social-links__link" href="https://mastodon.social/@s3in610" target="_blank" rel="noopener noreferrer" aria-label="Mastodon">MA</a></li>
+      <li><a class="social-links__link" href="https://linktree.wasiakpawel.pl/" target="_blank" rel="noopener noreferrer" aria-label="Linktree">LT</a></li>
+    </ul>
+    <div class="footer__bottom">
+      <p>© <span id="year"></span> Paweł Wasiak. Drzewo Genealogiczne — narzędzie open-source.</p>
+      <p class="footer__portfolio">Więcej projektów: <a href="https://linktree.wasiakpawel.pl/" target="_blank" rel="noopener noreferrer">portfolio Pawła Wasiaka</a></p>
+    </div>
+  </div>
+</footer>
 
 <!-- MODAL: dodaj/edytuj osobę -->
 <div class="modal-overlay hidden" id="personModalOverlay">
@@ -691,6 +850,24 @@ li:focus-visible{
 <div id="toast"></div>
 
 <script>
+/* ============================= POMIAR WYSOKOŚCI NAGŁÓWKA / ZAKŁADEK =============================
+   Nagłówek może się zawijać na wąskich ekranach (dłuższy tytuł + przyciski akcji),
+   więc zamiast zgadywać jego wysokość na sztywno w CSS, mierzymy ją realnie i
+   wystawiamy jako zmienne --header-h / --tabs-h, których używa layout (sekcja 5/6 CSS)
+   do wyliczenia dokładnej wysokości obszaru roboczego (100vh minus nagłówek/zakładki). */
+function syncLayoutHeightVars(){
+  const header = document.querySelector('header');
+  const tabs = document.getElementById('mobileTabs');
+  if(header) document.documentElement.style.setProperty('--header-h', header.offsetHeight + 'px');
+  if(tabs) document.documentElement.style.setProperty('--tabs-h', (tabs.offsetHeight || (window.innerWidth<=980 ? 0 : 0)) + 'px');
+  if(typeof renderTree === 'function') renderTree();
+}
+window.addEventListener('DOMContentLoaded', syncLayoutHeightVars);
+window.addEventListener('resize', ()=>{
+  clearTimeout(syncLayoutHeightVars._t);
+  syncLayoutHeightVars._t = setTimeout(syncLayoutHeightVars, 120);
+});
+
 /* ============================= MOTYW (DARK / LIGHT) ============================= */
 (function () {
   'use strict';
@@ -742,6 +919,33 @@ function showToast(msg){
   t.classList.add('show');
   clearTimeout(showToast._t);
   showToast._t = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+/* ============================= KOPIA ZAPASOWA — status ostatniego eksportu =============================
+   Dane są tylko w localStorage tej przeglądarki, więc jedyną "kopią zapasową" jest
+   ręczny eksport do pliku JSON (lub GEDCOM). Zapisujemy datę ostatniego eksportu,
+   żeby przypomnieć o regularnym robieniu kopii — po 14 dniach bez eksportu status
+   zmienia kolor na ostrzegawczy. */
+const BACKUP_KEY = 'genealogia_ostatni_backup';
+function markBackupDone(){
+  localStorage.setItem(BACKUP_KEY, new Date().toISOString());
+  updateBackupStatus();
+}
+function updateBackupStatus(){
+  const el = document.getElementById('backupStatus');
+  if(!el) return;
+  const raw = localStorage.getItem(BACKUP_KEY);
+  if(Object.keys(state.people).length===0){ el.textContent = ''; el.classList.remove('stale'); return; }
+  if(!raw){
+    el.textContent = 'Brak kopii zapasowej — wyeksportuj dane (JSON).';
+    el.classList.add('stale');
+    return;
+  }
+  const d = new Date(raw);
+  const days = Math.floor((Date.now()-d.getTime())/86400000);
+  const dateLabel = d.toLocaleDateString('pl-PL', {day:'2-digit', month:'2-digit', year:'numeric'});
+  el.textContent = `Ostatnia kopia zapasowa: ${dateLabel}${days>=1 ? ` (${days} dni temu)` : ''}`;
+  el.classList.toggle('stale', days>=14);
 }
 
 /* ============================= KOLORY MOTYWU DLA DRZEWA (SVG) =============================
@@ -1345,10 +1549,142 @@ function exportTreeToPDF(){
   img.src = url;
 }
 
+/* ============================= EKSPORT DO GEDCOM (.ged) =============================
+   GEDCOM 5.5.1 to standardowy format wymiany danych genealogicznych — pozwala
+   przenieść drzewo do innych programów/serwisów (np. Gramps, FamilySearch,
+   MyHeritage). Buduje rekordy INDI (osoby) oraz FAM (rodziny: para rodziców +
+   dzieci), wyliczone na podstawie relacji rodzic/dziecko i małżonek w danych. */
+function gedcomEscape(s){
+  return String(s??'').replace(/[\r\n]+/g, ' ').trim();
+}
+function gedcomDate(dateStr){
+  if(!dateStr) return '';
+  const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const m = String(dateStr).match(/^(\d{4})(?:-(\d{2})-(\d{2}))?/);
+  if(!m) return '';
+  const [, y, mo, d] = m;
+  if(mo && d) return `${parseInt(d,10)} ${MONTHS[parseInt(mo,10)-1]} ${y}`;
+  return y;
+}
+function buildGedcom(){
+  const ids = Object.keys(state.people);
+  if(ids.length===0) return null;
+
+  // Sekwencyjne, czytelne identyfikatory GEDCOM (I1, I2, ... / F1, F2, ...)
+  const indiId = new Map();
+  ids.forEach((id,i)=> indiId.set(id, `I${i+1}`));
+
+  // Grupowanie w rodziny: klucz = posortowani rodzice (albo pojedynczy rodzic).
+  // Rodziny bez dzieci (sami małżonkowie) też są uwzględniane.
+  const famMap = new Map(); // key -> { parents:[id,...], children:Set }
+  function famKey(parentIds){ return parentIds.slice().sort().join('+'); }
+  ids.forEach(id=>{
+    const p = state.people[id];
+    if(p.rodzice && p.rodzice.length){
+      const key = famKey(p.rodzice);
+      if(!famMap.has(key)) famMap.set(key, { parents: p.rodzice.slice(), children: new Set() });
+      famMap.get(key).children.add(id);
+    }
+  });
+  const seenSpousePairs = new Set();
+  ids.forEach(id=>{
+    const p = state.people[id];
+    (p.malzonkowie||[]).forEach(m=>{
+      if(!state.people[m.id]) return;
+      const key = famKey([id, m.id]);
+      if(seenSpousePairs.has(key)) return;
+      seenSpousePairs.add(key);
+      if(!famMap.has(key)) famMap.set(key, { parents: [id, m.id], children: new Set() });
+    });
+  });
+  const famKeys = Array.from(famMap.keys());
+  const famId = new Map();
+  famKeys.forEach((key,i)=> famId.set(key, `F${i+1}`));
+
+  // Dla każdej osoby: w jakich rodzinach jest dzieckiem (FAMC) i małżonkiem (FAMS)
+  const famcOf = new Map(); // personId -> famKey (pierwsza pasująca rodzina rodziców)
+  ids.forEach(id=>{
+    const p = state.people[id];
+    if(p.rodzice && p.rodzice.length) famcOf.set(id, famKey(p.rodzice));
+  });
+  const famsOf = new Map(); // personId -> Set(famKey)
+  famKeys.forEach(key=>{
+    famMap.get(key).parents.forEach(pid=>{
+      if(!famsOf.has(pid)) famsOf.set(pid, new Set());
+      famsOf.get(pid).add(key);
+    });
+  });
+
+  const lines = [];
+  lines.push('0 HEAD');
+  lines.push('1 SOUR Moje_Drzewo_Genealogiczne');
+  lines.push('1 GEDC');
+  lines.push('2 VERS 5.5.1');
+  lines.push('2 FORM LINEAGE-LINKED');
+  lines.push('1 CHAR UTF-8');
+  lines.push(`1 DATE ${new Date().toISOString().slice(0,10)}`);
+
+  ids.forEach(id=>{
+    const p = state.people[id];
+    lines.push(`0 @${indiId.get(id)}@ INDI`);
+    const given = gedcomEscape(p.imie) || '?';
+    const surname = gedcomEscape(p.nazwiskoRodowe || p.nazwisko) || '?';
+    lines.push(`1 NAME ${given} /${surname}/`);
+    if(p.plec==='M') lines.push('1 SEX M');
+    else if(p.plec==='K') lines.push('1 SEX F');
+    else lines.push('1 SEX U');
+    if(p.dataUrodzenia || p.miejsceUrodzenia){
+      lines.push('1 BIRT');
+      const bd = gedcomDate(p.dataUrodzenia);
+      if(bd) lines.push(`2 DATE ${bd}`);
+      if(p.miejsceUrodzenia) lines.push(`2 PLAC ${gedcomEscape(p.miejsceUrodzenia)}`);
+    }
+    if(p.dataSmierci || p.miejsceSmierci){
+      lines.push('1 DEAT Y');
+      const dd = gedcomDate(p.dataSmierci);
+      if(dd) lines.push(`2 DATE ${dd}`);
+      if(p.miejsceSmierci) lines.push(`2 PLAC ${gedcomEscape(p.miejsceSmierci)}`);
+    }
+    if(p.notatki) lines.push(`1 NOTE ${gedcomEscape(p.notatki)}`);
+    if(famcOf.has(id)) lines.push(`1 FAMC @${famId.get(famcOf.get(id))}@`);
+    if(famsOf.has(id)) famsOf.get(id).forEach(key=> lines.push(`1 FAMS @${famId.get(key)}@`));
+  });
+
+  famKeys.forEach(key=>{
+    const fam = famMap.get(key);
+    lines.push(`0 @${famId.get(key)}@ FAM`);
+    fam.parents.forEach(pid=>{
+      const person = state.people[pid];
+      const tag = person && person.plec==='K' ? 'WIFE' : 'HUSB'; // nieznana płeć -> traktowana jak HUSB (ograniczenie formatu GEDCOM)
+      lines.push(`1 ${tag} @${indiId.get(pid)}@`);
+    });
+    fam.children.forEach(cid=> lines.push(`1 CHIL @${indiId.get(cid)}@`));
+  });
+
+  lines.push('0 TRLR');
+  return lines.join('\n');
+}
+function exportToGedcom(){
+  const gedcom = buildGedcom();
+  if(!gedcom){
+    showToast('Dodaj przynajmniej jedną osobę, aby wyeksportować do GEDCOM.');
+    return;
+  }
+  const blob = new Blob([gedcom], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `drzewo-genealogiczne-${new Date().toISOString().slice(0,10)}.ged`;
+  a.click();
+  URL.revokeObjectURL(url);
+  markBackupDone();
+  showToast('Drzewo wyeksportowane do GEDCOM (.ged).');
+}
+
 function renderAll(){
   renderPeopleList();
   renderDetails();
   renderTree();
+  updateBackupStatus();
 }
 
 /* ============================= MODALS: PERSON ============================= */
@@ -1515,8 +1851,10 @@ document.getElementById('btnExport').addEventListener('click', ()=>{
   a.href = url; a.download = `drzewo-genealogiczne-${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
-  showToast('Dane wyeksportowane.');
+  markBackupDone();
+  showToast('Dane wyeksportowane — to Twoja kopia zapasowa (JSON).');
 });
+document.getElementById('btnExportGedcom').addEventListener('click', exportToGedcom);
 document.getElementById('importFile').addEventListener('change', (e)=>{
   const file = e.target.files[0];
   if(!file) return;
@@ -1552,9 +1890,13 @@ document.getElementById('zoomReset').addEventListener('click', renderTree);
 window.addEventListener('resize', ()=> renderTree());
 
 /* ============================= INIT ============================= */
+const yearEl = document.getElementById('year');
+if(yearEl) yearEl.textContent = new Date().getFullYear();
+
 loadState();
 renderAll();
 switchTab(Object.keys(state.people).length>0 ? 'drzewo' : 'osoby');
+syncLayoutHeightVars();
 </script>
 </body>
 </html>
